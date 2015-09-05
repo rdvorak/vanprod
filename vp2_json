@@ -1,0 +1,156 @@
+#!/usr/bin/perl
+ 
+
+{
+    package MyWebServer;
+no warnings; 
+    use HTTP::Server::Simple::CGI;
+    use base qw(HTTP::Server::Simple::CGI);
+
+use JSON;
+use DBI();
+use DBD::Oracle;
+
+    $ENV{ORACLE_HOME} = '/u01/app/oracle/product/11.2.0/xe';
+    $ENV{ORACLE_SID}    = 'XE';
+
+#    $ENV{NLS_LANG}    = 'CZECH_CZECH REPUBLIC.AL32UTF8';
+#    $ENV{NLS_NUMERIC_CHARACTERS}    = '.,';
+
+    my $dbh;
+ 
+ my %dispatch = (
+     'in-pocasi' => \&resp_in_pocasi,
+     'current' => \&resp_current,
+     'archive' => \&resp_archive,
+     # ...
+     );
+ 
+ 
+sub handle_request {
+    my $self = shift;
+    my $cgi  = shift;
+ 
+    my $path = $cgi->path_info();
+    my $typeofdata = $cgi->param('type');
+#    print $cgi->param;
+    $typeofdata =  'in-pocasi' if (! $typeofdata);
+    my $handler = $dispatch{$typeofdata};
+
+ 
+    if (ref($handler) eq "CODE") {
+ 
+	print "HTTP/1.0 200 OK\r\n";
+	$handler->($cgi);
+
+    } else {
+	print "HTTP/1.0 404 Not found\r\n";
+         print $cgi->header,
+               
+               $cgi->start_html('Not found'),
+               $cgi->h1('Not found ' . $path . $typeofdata),
+	$cgi->end_html;
+    }
+
+ }
+  
+
+sub resp_in_pocasi {
+    my $cgi  = shift;   # CGI.pm object
+    return if !ref $cgi;
+    $ENV{ORACLE_HOME} = '/u01/app/oracle/product/11.2.0/xe';
+    $ENV{ORACLE_SID}    = 'XE';
+
+my $dbh = DBI->connect("dbi:Oracle:host=192.168.0.7;sid=XE;port=1521", "vp2", "vp2", {'RaiseError' => 1}) || print $DBI::errstr;
+    $dbh->do("ALTER SESSION SET NLS_NUMERIC_CHARACTERS = '.,'");
+     
+  my $sth = $dbh->prepare("SELECT '|'||to_char(to_date(curr_date,'YYYYMMDDHH24MISS'),'DD.MM.YYYY||HH24:MI')||'|'||outtemp||'|'||outhum||'|'||bar||'|'||round(avg_wspeed/3.6,1)||'|'||winddir_deg||'|'||dayrain||'|' from data_curr") || print $DBI::errstr;
+  $sth->execute() || print $DBI::errstr;
+  my ($response) = $sth->fetchrow_array();
+  $sth->finish();
+ $dbh->disconnect;
+    print $cgi->header('text/plain');
+    print $response;
+
+  };
+
+
+sub resp_current {
+    my $cgi  = shift;   # CGI.pm object
+    return if !ref $cgi;
+    $ENV{ORACLE_HOME} = '/u01/app/oracle/product/11.2.0/xe';
+    $ENV{ORACLE_SID}    = 'XE';
+
+my $dbh = DBI->connect("dbi:Oracle:host=192.168.0.7;sid=XE;port=1521", "vp2", "vp2", {'RaiseError' => 1}) || print $DBI::errstr;
+    $dbh->do("ALTER SESSION SET NLS_NUMERIC_CHARACTERS = '.,'");
+
+  my $sth = $dbh->prepare("SELECT curr_date, bar, bar_trend, outtemp, windspeed, avg_wspeed, winddir, outhum, stormrain, stormstart, dayrain, rain_rate, monrain, yearrain from data_curr") || print $DBI::errstr;
+  $sth->execute() || print $DBI::errstr;
+  my @dataset;
+  while (my $ref = $sth->fetchrow_hashref()) {
+      push(@dataset,\%$ref);
+  }
+  $sth->finish();
+ $dbh->disconnect;
+    $json = encode_json \@dataset;
+
+    print $cgi->header('application/json');
+
+    print '{ "dataset": ' . $json . ' }';
+
+  };
+
+my %cols = (
+   # epoche_time => 0,
+    hi_outtemp => 1, 
+    lo_outtemp => 2, 
+    rain => 3, 
+    bar => 4, 
+    hi_wspeed => 5 
+    );
+
+
+sub resp_archive {
+    my $cgi  = shift;   # CGI.pm object
+    return if !ref $cgi;
+    $ENV{ORACLE_HOME} = '/u01/app/oracle/product/11.2.0/xe';
+    $ENV{ORACLE_SID}    = 'XE';
+
+    my $datefrom = $cgi->param('from');
+    my $dateto = $cgi->param('to');
+
+my $dbh = DBI->connect("dbi:Oracle:host=192.168.0.7;sid=XE;port=1521", "vp2", "vp2", {'RaiseError' => 1}) || print $DBI::errstr;
+    $dbh->do("ALTER SESSION SET NLS_NUMERIC_CHARACTERS = '.,'");
+
+  my $sth = $dbh->prepare("SELECT round((to_date(id,'YYYYMMDDHH24MI') - to_date('01011970','DDMMYYYY'))*24*60*60*1000) epoche_time,  hi_outtemp, lo_outtemp, rain,  bar, hi_wspeed from data_arch where id between $datefrom" . "0000 and $dateto" . "9999" ) || print $DBI::errstr;
+  $sth->execute() || print $DBI::errstr;
+  my %data;
+    my $rows = $sth->fetchall_arrayref();
+    while (my $row = shift(@$rows)) {
+       foreach  my $col (keys %cols) {
+           my @pair = ( 0 + $$row[ 0 ], 0 + $$row[ $cols{ $col }  ]);
+           push(@{ $data{$col} }, \@pair);
+       }
+
+    }
+
+  $sth->finish();
+ $dbh->disconnect;
+  # Disconnect from the database.
+
+    $json = encode_json \%data;
+    
+    print $cgi->header('application/json');
+    print $json;
+    return;
+
+}
+1;
+ 
+}
+
+#my $pid = MyWebServer->new(8484);
+my $pid = MyWebServer->new(8383)->background();
+print "Use 'kill $pid' to stop server.\n";
+
+#handler;

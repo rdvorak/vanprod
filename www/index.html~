@@ -1,0 +1,208 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+	  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"> 
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en"> 
+  <head> 
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" /> 
+    <meta name="keywords" content="Weather,Pozdechov, Meteo, Pocasi, Meteostanice, VantagePro 2" /> 
+<link rel="shortcut icon" href="/favicon.ico" /> 
+<title>Meteostanice Pozdechov</title> 
+<link rel="stylesheet" href="main.css" type="text/css" /> 
+<script type="text/javascript" src="jquery-1.7.2.min.js"></script> 
+<script type="text/javascript" src="jquery-ui-1.8.21.custom.min.js"></script> 
+<script type="text/javascript" src="jquery.timers-1.2.js"></script> 
+<script>
+  $(function() {
+  $( "#from" ).datepicker({
+  defaultDate: "+1w",
+  changeMonth: true,
+  numberOfMonths: 3,
+  onSelect: function( selectedDate ) {
+  $( "#to" ).datepicker( "option", "minDate", selectedDate );
+  }
+  });
+  $( "#to" ).datepicker({
+  defaultDate: "+1w",
+  changeMonth: true,
+  numberOfMonths: 3,
+  onSelect: function( selectedDate ) {
+  $( "#from" ).datepicker( "option", "maxDate", selectedDate );
+  }
+  });
+  });
+  </script>
+</head> 
+<body>
+  <div id="wrapper">
+  <div id="header">
+
+     <h1 style="margin-bottom: 5px">Meteostanice Pozděchov</h1>
+
+     <h4 style="margin: 0px;" >49°14'N, 17°58'E, n.v. 510 m</h4>
+   <img  style="margin-top: 5px; padding: 0px" src="meteo-pozdechov.png" />   
+  </div>
+  <table id="main">
+  <tr><td><div id=_datum class=leftside>Čas</div></td><td><div id=datum class=rightside></div></td></tr>
+  <tr><td><div id=_teplota class=leftside>Teplota</div></td><td><div id=teplota class=rightside></div></td></tr>
+  <tr><td><div id=_tlak class=leftside>Tlak</div></td><td><div id=tlak class=rightside></div></td></tr>
+  <tr><td><div id=_vlhkost class=leftside>Vlhkost</div></td><td><div id=vlhkost class=rightside></div></td></tr>
+  <tr><td><div id=_daily_rain class=leftside>Srážky dnes</div></td><td><div id=daily_rain class=rightside></div></td></tr>
+  <tr><td><div id=_month_to_date_rain class=leftside>Srážky v měsíci</div></td><td><div id=month_to_date_rain class=rightside></div></td></tr>
+  <tr><td><div id=_year_to_date_rain class=leftside>Srážky v roce</div></td><td><div id=year_to_date_rain class=rightside></div></td></tr>
+  <tr><td><div id=_storm_total_rainfall class=leftside>Srážky z bouřky</div></td><td><div id=storm_total_rainfall class=rightside></div></td></tr>
+  </table>  
+  <img id="current_camview" style="hidden" src="img/current_camview.jpg" />
+<div class="demo" style="padding-left: 60px; ">
+
+<label for="from">From</label>
+<input type="text" id="from" name="from"/>
+<label for="to">to</label>
+<input type="text" id="to" name="to"/>
+
+</div>
+
+  <div id="chartsDay" style="padding-left: 60px; ">
+     <div id='chartTmpe' style="margin-top: 20px; width: 640px; height: 240px;"></div> 
+     <div id='chartBaro' style="margin-top: 20px; width: 640px; height: 240px;"></div> 
+
+     <div id='chartHumi' style="margin-top: 20px; width: 640px; height: 240px;"></div> 
+     <div id='chartRain' style="margin-top: 20px; width: 640px; height: 240px;"></div> 
+     <div id='chartWind' style="margin-top: 20px; width: 640px; height: 240px;"></div> 
+     <img  style="margin-top: 20px; width: auto; margin-left: 50px;margin-right: auto" src="DSC_1224.JPG" />   
+  
+  </div>
+  </div>
+ <script type='text/javascript' src='http://www.google.com/jsapi'></script>
+    <script type='text/javascript'>
+      google.load('visualization', '1', {'packages':['annotatedtimeline']});
+      google.setOnLoadCallback(drawChart);
+
+      var chart;
+      function drawChart() {
+      var dataTmpe = new google.visualization.DataTable();      
+      var dataBaro = new google.visualization.DataTable();      
+      var dataHumi = new google.visualization.DataTable();      
+      var dataWind = new google.visualization.DataTable();      
+      var dataRain = new google.visualization.DataTable();      
+      
+        dataTmpe.addColumn('date', 'Date');
+        dataTmpe.addColumn('number', 'Teplota (min)');
+        dataTmpe.addColumn('string', 'title1');
+        dataTmpe.addColumn('string', 'text1');
+        dataTmpe.addColumn('number', 'Teplota (max)');
+        dataTmpe.addColumn('string', 'title2');
+        dataTmpe.addColumn('string', 'text2');
+        dataBaro.addColumn('date', 'Date');
+        dataBaro.addColumn('number', 'Tlak');
+        dataBaro.addColumn('string', 'title2');
+        dataBaro.addColumn('string', 'text2');
+ 
+        dataHumi.addColumn('date', 'Date');
+        dataHumi.addColumn('number', 'Vlhkost');
+        dataHumi.addColumn('string', 'title2');
+        dataHumi.addColumn('string', 'text2');
+        dataWind.addColumn('date', 'Date');
+        dataWind.addColumn('number', 'Vítr (max)');
+        dataWind.addColumn('string', 'title2');
+        dataWind.addColumn('string', 'text2');
+        dataRain.addColumn('date', 'Date');
+        dataRain.addColumn('number', 'Srážky');
+        dataRain.addColumn('string', 'title2');
+        dataRain.addColumn('string', 'text2');
+
+       function addDays (dataset) {
+      
+          var un;
+ 
+   for(i in dataset.id)  {
+          d = dataset.id[i].toString();
+       
+          date = new Date(d.substr(0,4), d.substr(4,2) -1 ,d.substr(6,2), d.substr(8,2),d.substr(10,2));
+          dataTmpe.addRows([
+            [date, 
+                Number(dataset.lo_outtemp[i]), un, un, Number(dataset.hi_outtemp[i]), un, un 
+            ]
+           ]);
+
+          dataBaro.addRows([
+            [date, 
+                 Number(dataset.bar[i]), un, un
+            ]
+           ]);
+          dataHumi.addRows([
+            [date, 
+                Number(dataset.outhum[i]),un,un
+            ]
+           ]);
+          dataWind.addRows([
+            [date, 
+                Number(dataset.hi_wspeed[i]),un,un
+            ]
+           ]);
+          dataRain.addRows([
+            [date, 
+                Number(dataset.rain[i]),un,un 
+            ]
+           ]);
+          };
+        };     
+        newdate = new Date();
+
+           $.getJSON("vp2_json?type=archive",
+            function(json_data){ 
+          addDays(json_data);
+
+          zoomStart= new Date();
+          zoomStart.setTime(zoomStart.getTime() - 3600000*24*7);  // 7 days back
+          chartTmpe = new google.visualization.AnnotatedTimeLine(document.getElementById('chartTmpe')); 
+          chartTmpe.draw(dataTmpe, {thickness: 2, zoomStartTime: zoomStart, max: 35, dateFormat: 'dd. MMMM yyyy, HH:mm', allValuesSuffix: ' °C'});
+ 
+          chartBaro = new google.visualization.AnnotatedTimeLine(document.getElementById('chartBaro')); 
+          chartBaro.draw(dataBaro, {thickness: 2, zoomStartTime: zoomStart, scaleType: 'allmaximized', min: 980, displayExactValues: true, dateFormat: 'dd. MMMM yyyy, HH:mm', allValuesSuffix: ' hPa'});
+      
+        
+          chartHumi = new google.visualization.AnnotatedTimeLine(document.getElementById('chartHumi')); 
+          chartRain = new google.visualization.AnnotatedTimeLine(document.getElementById('chartRain')); 
+          chartWind = new google.visualization.AnnotatedTimeLine(document.getElementById('chartWind')); 
+    
+          chartHumi.draw(dataHumi, {thickness: 2, zoomStartTime: zoomStart, dateFormat: 'dd. MMMM yyyy, HH:mm', allValuesSuffix: ' %'});
+          chartRain.draw(dataRain, {thickness: 2, zoomStartTime: zoomStart, dateFormat: 'dd. MMMM yyyy, HH:mm', allValuesSuffix: ' mm'});
+          chartWind.draw(dataWind, {thickness: 2, zoomStartTime: zoomStart, dateFormat: 'dd. MMMM yyyy, HH:mm', allValuesSuffix: ' km/h'});
+       });
+      };
+  
+
+     
+
+     function to_c(f){return (f-32)*(5/9)};
+     function to_mm(i){return i*25.4};
+     function to_hpa(hg){return (3386.39*hg/100)};
+     function to_kmh(mh){return (mh*1.609344)};
+
+//     function aprox(a b c) {if (a !== 0) then return a; else if (b == 0 ) return (b+c)/2;} 
+     function currentobs(){
+        newdate = new Date();
+        $.getJSON("vp2_json?type=current"  ,
+//        $.getJSON("vp2_json?current&" + newdate.getTime().toString()   ,
+        function(data){
+          d = data.dataset[0].CURR_DATE;
+          date = new Date(d.substr(0,4), d.substr(4,2) -1 ,d.substr(6,2), d.substr(8,2),d.substr(10,2));
+  
+          $('div#datum').text(date.toLocaleTimeString());
+          $('div#tlak').text((Number(data.dataset[0].BAR)).toFixed(1) + " hPa");
+          $('div#teplota').text(Number(data.dataset[0].OUTTEMP).toFixed(1) + "°C");
+          $('div#vlhkost').text(data.dataset[0].OUTHUM + " %");
+          $('div#daily_rain').text(Number(data.dataset[0].DAYRAIN).toFixed(0) + " mm");
+          $('div#month_to_date_rain').text(Number(data.dataset[0].MONRAIN).toFixed(0) + " mm");
+          $('div#year_to_date_rain').text(Number(data.dataset[0].YEARRAIN).toFixed(0) + " mm");
+          $('div#storm_total_rainfall').text(Number(data.dataset[0].STORMRAIN).toFixed(0) + " mm");
+        }); 
+     }
+     $(document).ready(function(){
+
+        currentobs(); 
+        window.setInterval(function(){currentobs();},60000);   
+//        event.preventDefault();
+     });
+   </script>
+ </body>
+ </html>

@@ -1,0 +1,347 @@
+#!/usr/bin/perl
+
+use Getopt::Std;
+use strict;
+use Device::Davis 1.1.0;
+use Sys::Syslog qw(:DEFAULT setlogsock);
+use POSIX;
+#use POSIX qw(:errno_h :fcntl_h strftime);
+use Socket qw(:DEFAULT :crlf); 
+
+use DBI;
+use DBD::Oracle;
+
+    $ENV{ORACLE_HOME} = '/u01/app/oracle/product/11.2.0/xe';
+    $ENV{ORACLE_SID}    = 'XE';
+
+
+my %opts = ();
+getopts('dt', \%opts);
+
+my $tty = "/dev/" . `/bin/dmesg | /usr/bin/perl -n -e '\$a = \$1 if /cp210.\*attached to (\\w+)/; END { print \$a}'`;
+my $facility = "local0"; 
+my $name = "vp2"; # name of the executable for syslog
+my $piddir = "/var/run/"; 
+my $db = "dbi:Oracle:host=localhost;sid=XE;port=1521";
+my $db_user = "vp2"; 
+my $db_password = "vp2";
+my $bar_calib = 1.00245;
+
+my %loop;
+my $bytes = "";
+my @data = ();  
+
+my %winddir = ( 0 => 'N', 1 => 'NNE', 2 => 'NE', 3 => 'ENE', 4 => 'E',
+             5 => 'ESE', 6 => 'SE', 7 => 'SSE', 8 => 'S', 9 => 'SSW',
+             10 => 'SW', 11 => 'WSW', 12 => 'W', 13 => 'WNW', 14 =>
+             'NW', 15 => 'NNW' );
+
+
+# Open the tty
+unless(-r "$tty"){die "You do not have read permission for $tty\n";};
+unless(-w "$tty"){die "You do not have write permission for $tty\n";};
+my $fd = station_open($tty) or die "Cannot open $tty $!\n";
+
+my $dbh;
+
+my $term;
+
+$SIG{TERM} = sub { 
+   $term = 1;
+   mylog('info', "Sigterm caught.");
+};
+
+
+
+if($opts{d}){   # if we want to be daemon
+    sleep(3);
+    # Become a daemon
+    my $pid = fork();
+    if($pid){ 
+	exit; 
+    };
+    if(!defined $pid){ 
+	die "Couldn't fork -- $!\n";
+    };
+    POSIX::setsid() or die "Can't start new daemon session:  $!\n";
+    setlogsock("unix"); 
+    openlog("$name", "pid", "$facility");
+    open(PIDFILE, ">$piddir/$name.pid") or mylog("err", "Exiting can't write pid file $piddir/$name.pid %m") and die;
+    print PIDFILE $$;
+    close(PIDFILE);
+    mylog("info", "$name started.");
+
+
+    until($term){ # Main loop of the daemon
+	my  $minute = (localtime)[1];
+        $dbh->disconnect if ($dbh);
+     	$dbh = DBI->connect("$db","$db_user","$db_password",{ RaiseError => 0, PrintError => 1, AutoCommit => 0}) or  mylog("err","Cant connect to $db: $DBI::errstr"); 
+        eval {
+	    
+	    get_arch_data() if ($minute ~~ (5,10,15,20,25,30,35,40,45,50,55) and $dbh);
+	    get_curr_data() if ($dbh);
+        };
+        mylog('err',@$) if (@$);
+	sleep(40); }; 
+
+    }
+else { # not deamon
+     $dbh = DBI->connect("$db","$db_user","$db_password",{
+        RaiseError => 1, AutoCommit => 0}) or mylog("err","Cant connect to $db: $DBI::errstr");
+
+    get_arch_data();
+    get_curr_data();
+     $dbh->disconnect if ($dbh);
+    exit;
+};
+
+mylog("info", "$name exiting.");
+closelog();
+POSIX::close($fd);
+$dbh->disconnect if ($dbh);
+exit;
+
+
+sub mylog {
+    my ($type, $text) = @_;
+    return if (($type =~ /debug/) && !($opts{t}));
+    if ($opts{d}) {
+	syslog($type, $text);
+    } else {
+        print "$type: $text\n";
+    }
+};
+
+
+
+sub mycrc_accum {
+    my $crc;
+    foreach my $byte (@_) {
+	$crc = crc_accum($crc, $byte);
+    }
+    return $crc;
+};
+
+sub get_bytes {
+    my @data;
+    my ($bytes) = @_;
+    eval {
+        local $SIG{ALRM} = sub { die "alarm\n"  }; # NB: \n required
+        alarm 3;
+
+        for (my $i = 0; $i < $bytes; $i++) {
+        	$data[$i] = get_char($fd);
+        };
+        alarm 0;
+        return @data;
+    };
+    return if (@$);
+    return @data;
+};
+
+
+sub b2n {
+    my ($offset, $length) = @_;
+    return  $data[$offset+1] * 256 + $data[$offset];
+}
+
+sub wake_up {
+    mylog('debug','sub wake_up');
+    POSIX::tcflush($fd, TCIOFLUSH);
+    for my $i (1..3) {
+      sleep(2);
+      $bytes = put_string ($fd, "\n");
+  
+      sleep(2);
+      my @data = get_bytes(2);
+    
+      return 1 if ((10,13) ~~ @data);
+      mylog('debug','retry');
+    };
+    mylog("err", "Console connection error.  Closing and re-opening serial port.");
+    POSIX::close($fd);
+    $tty = "/dev/" . `/bin/dmesg | /usr/bin/perl -n -e '\$a = \$1 if /cp210.\*attached to (\\w+)/; END { print \$a}'`;
+    $fd = station_open($tty);
+    return 0;
+};
+
+sub get_curr_data {
+    mylog('debug', "get_data");
+
+return unless (wake_up());
+   $bytes = put_string($fd, "LOOP 1\n");
+
+my $i = 0; 
+my $crc = 0; 
+
+@data = get_bytes(100);
+
+$loop{curr_date} = sprintf("%4d%02d%02d%02d%02d%02d", (localtime)[5] +1900 ,(localtime)[4] +1, (localtime)[3],(localtime)[2], (localtime)[1], (localtime)[0]);
+$loop{bar} = sprintf("%.1f",(b2n(8)*33.7685)*$bar_calib/1000); # hpa
+$loop{bar_trend} = $data[4];
+$loop{intemp} = sprintf("%.1f", (5/9)*(b2n(10)/10 -32)); # celsius
+$loop{inhum} = $data[12];
+$loop{outtemp} = sprintf("%.1f", (5/9)*(b2n(13)/10 -32)); # celsius
+$loop{windspeed} = sprintf("%.1f",$data[15]*1.609344);
+$loop{avg_wspeed} = sprintf("%.1f",$data[16]*1.609344) unless($data[16] > 150);
+$loop{winddir} = $winddir{sprintf("%d", b2n(17)/22.5)};
+$loop{winddir_deg} = sprintf("%d", b2n(17));
+
+
+$loop{outhum} = $data[34];
+$loop{stormrain} = b2n(47)/5;
+
+    if  (sprintf("%02x%02x",$data[50],$data[49]) == 'ffff') {
+	$loop{stormstart} = 0; }
+    else {
+	my $bindate = unpack("B16", pack("H4", sprintf("%02x%02x",$data[50],$data[49])));
+
+	my $year = unpack("N", pack("B32", substr("0" x 32 . substr($bindate,8,7),-32))) + 2000;
+	my $month = unpack("N", pack("B32", substr("0" x 32 . substr($bindate,0,4),-32))) ;
+	my $day = unpack("N", pack("B32", substr("0" x 32 . substr($bindate,5,5),-32))) ;
+
+	$loop{stormstart} = sprintf("%04d%02d%02d", $year, $month, $day);
+    };
+   $loop{dayrain} =  b2n(51)/5;
+   $loop{rain_rate} = b2n(42)/5 ;
+   $loop{monrain} = b2n(53)/5;
+   $loop{yearrain} = b2n(55)/5;
+   $loop{forecasticon} = $data[90];
+   $loop{forecastrule} = $data[91];
+
+    return if ($loop{outtemp} > 50 || $loop{outtemp} < -50 || $loop{outhum} > 100 || $loop{outhum} < 0);
+
+    my $columns =  join (",", (keys %loop));
+    my $vals = $columns;
+    $vals =~ s/\w+/\?/g;
+
+    my $dbst = $dbh->prepare('insert into data_curr (' . $columns . ' ) values ( ' . $vals . ')') or mylog('err',$dbh->errstr);
+    $dbh->do('delete from data_curr') or mylog('err',$dbh->errstr);
+    $dbst->execute(values %loop) or mylog('err',$dbh->errstr);
+    $dbh->commit;
+    mylog('debug', $columns );
+    mylog('debug', join(",",(values %loop)));
+}; # end sub
+
+
+
+sub get_arch_data {
+    mylog('debug', "get_arch_data");
+
+return unless (wake_up());
+
+
+    my $dbst = $dbh->prepare('select max(id) from data_arch') or mylog('err',$dbh->errstr);
+       $dbst->execute or mylog('err',$dbh->errstr);;
+    my ($last_date) =   $dbst->fetchrow_array ;
+    $last_date = "200001010000" unless $last_date;
+    my $fromday = substr($last_date,6,2);
+    my $frommonth = substr($last_date,4,2);
+    my $fromyear = substr($last_date,0,4);
+    my $fromhour = substr($last_date,8,2);
+    my $fromminute =substr($last_date,10,2);
+    my $fromDate = $fromday + $frommonth*32 + ($fromyear - 2000)*512;
+    my $fromTime = $fromhour*100 + $fromminute;
+
+
+my @bytes2send = ( hex(substr(sprintf("%02x",$fromDate),-2)), hex(substr(sprintf("%02x",$fromDate),0,-2)),  
+                   hex(substr(sprintf("%02x",$fromTime),-2)), hex(substr(sprintf("%02x",$fromTime),0,-2))
+                 );
+
+my $crc = mycrc_accum(@bytes2send);
+my $msbyte = $crc >> 8;
+my $lsbyte = $crc << 24;
+my $lsbyte = $lsbyte >> 24;
+push @bytes2send, $msbyte, $lsbyte;
+ 
+$bytes = put_string($fd, "DMPAFT\n");
+
+mylog("debug", "Wrote $bytes bytes to $tty for DMPAFT");
+@data = get_bytes(1);
+if($data[0] == 6){
+    POSIX::tcflush($fd, TCIOFLUSH);
+    $bytes = 0;
+  foreach my $byte (@bytes2send) {
+    $bytes += put_unsigned($fd, $byte);
+  #    $bytes += put_string($fd, "\n");
+  }
+}
+@data = get_bytes(1);
+
+if($data[0] == 6){
+    @data =  get_bytes(6);
+}
+else { 
+    mylog ("err", $data[0] . " from $tty for DMPAFT");
+    return;
+};
+
+    my $dbst = $dbh->prepare('insert into data_arch (id, outtemp, hi_outtemp, lo_outtemp, rain, rain_rate , bar, outhum, avg_wspeed , hi_wspeed, dir_hi_wspeed, avg_wdir) values (?,?,?,?,?,?,?,?,?,?,?,? )') or mylog('err',$dbh->errstr);
+
+    my $pages = hex("$data[1]$data[0]");
+    my $first_record = hex("$data[3]$data[2]");
+
+    mylog("debug", "pages $pages,first_record $first_record");
+    $bytes = put_unsigned($fd, 6) if ($pages);   
+    for (my $i=0; $i < $pages; $i++) {
+#       POSIX::tcflush($fd, TCIOFLUSH); 
+       my @pagedata = get_bytes(265);
+        $crc =  mycrc_accum(@pagedata);
+        ($msbyte, $lsbyte) = get_bytes(2);
+        if ($crc ==  $msbyte*256+$lsbyte) {
+           $bytes = put_unsigned($fd, 6);  # ACK 
+        }
+        else {
+            $bytes = put_unsigned($fd, hex("21"));  # ESC 
+            mylog('err', "crc NOK page $i of $pages");
+            $dbh->commit;
+            return;
+        };
+	foreach my $ii (1,2,3,4,5) {
+            next if ($ii <= $first_record && $i == 0);
+	    @data = @pagedata[(1+ ($ii-1)*52 .. $ii*52)];
+
+            my $bindate = unpack("B16", pack("H4", sprintf("%02x%02x",$data[1],$data[0])));
+      
+            my $year = unpack("N", pack("B32", substr("0" x 32 . substr($bindate,0,7),-32))) + 2000;
+            my $month = unpack("N", pack("B32", substr("0" x 32 . substr($bindate,7,4),-32))) ;
+            my $day = unpack("N", pack("B32", substr("0" x 32 . substr($bindate,11,5),-32))) ;
+    
+            my $hour = substr(b2n(2),0,-2);
+            my $minute =  substr(b2n(2),-2);
+            my $date = sprintf ("%04d%02d%02d%02d%02d", $year,$month,$day,$hour,$minute);
+   
+            if ($date < sprintf ("%04d%02d%02d%02d%02d",$fromyear,$frommonth,$fromday,$fromhour,$fromminute)) {
+                 $bytes = put_unsigned($fd, hex("1B")); # ESC
+		 POSIX::tcflush($fd, TCIOFLUSH);
+                 return;
+            };  
+            my $outtemp = sprintf("%.1f",(5/9)*(b2n(4)/10 -32));
+            my $hi_outtemp = sprintf("%.1f",(5/9)*(b2n(6)/10 -32));
+            my $lo_outtemp = sprintf("%.1f",(5/9)*(b2n(8)/10 -32));
+            my $rain = sprintf("%.1f",b2n(10)/5);
+            my $rain_rate = sprintf("%.1f",b2n(12)/5);
+            my $bar = sprintf("%.1f",b2n(14)*33.7685* $bar_calib/1000);
+            my $outhum = sprintf("%.1f",$data[23]); 
+	    my $avg_wspeed = sprintf("%.1f",$data[24]);
+	    my $hi_wspeed = sprintf("%.1f",$data[25]);
+	    my $dir_hi_wspeed = $winddir{$data[26]};
+            my $avg_wdir = $winddir{$data[27]};
+
+	    $dbst->execute($date, $outtemp, $hi_outtemp, $lo_outtemp, $rain, $rain_rate , $bar, $outhum, $avg_wspeed , $hi_wspeed, $dir_hi_wspeed, $avg_wdir) or  mylog('err',$dbh->errstr);
+
+        };
+
+ 
+    }   
+
+#    POSIX::tcflush($fd, TCIOFLUSH);
+    $bytes = put_unsigned($fd, hex("1B")) if ($pages); # ESC
+    $dbh->commit if ($dbh);
+    
+   POSIX::tcflush($fd, TCIOFLUSH);
+   return;
+};
+ # end sub
+
+
