@@ -310,7 +310,7 @@ else {
             my $hour = substr(b2n(2),0,-2);
             my $minute =  substr(b2n(2),-2);
             my $date = sprintf ("%04d%02d%02d%02d%02d", $year,$month,$day,$hour,$minute);
-   
+  next if $date == 2127153165535; 
             if ($date < sprintf ("%04d%02d%02d%02d%02d",$fromyear,$frommonth,$fromday,$fromhour,$fromminute)) {
                  $bytes = put_unsigned($fd, hex("1B")); # ESC
 		 POSIX::tcflush($fd, TCIOFLUSH);

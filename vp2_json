@@ -23,6 +23,7 @@ use DBD::Oracle;
      'in-pocasi' => \&resp_in_pocasi,
      'current' => \&resp_current,
      'archive' => \&resp_archive,
+     'archive_day' => \&resp_archive_day,
      # ...
      );
  
@@ -122,7 +123,54 @@ sub resp_archive {
 my $dbh = DBI->connect("dbi:Oracle:host=192.168.0.7;sid=XE;port=1521", "vp2", "vp2", {'RaiseError' => 1}) || print $DBI::errstr;
     $dbh->do("ALTER SESSION SET NLS_NUMERIC_CHARACTERS = '.,'");
 
-  my $sth = $dbh->prepare("SELECT round((to_date(id,'YYYYMMDDHH24MI') - to_date('01011970','DDMMYYYY'))*24*60*60*1000) epoche_time,  hi_outtemp, lo_outtemp, rain,  bar, hi_wspeed from data_arch where id between $datefrom" . "0000 and $dateto" . "9999" ) || print $DBI::errstr;
+  my $sth = $dbh->prepare("SELECT round((to_date(id,'YYYYMMDDHH24MI') - to_date('01011970','DDMMYYYY'))*24*60*60*1000) epoche_time,  hi_outtemp, lo_outtemp, rain,  bar, hi_wspeed from data_arch where id between $datefrom" . "0000 and $dateto" . "9999 order by 1"  ) || print $DBI::errstr;
+  $sth->execute() || print $DBI::errstr;
+  my %data;
+    my $rows = $sth->fetchall_arrayref();
+    while (my $row = shift(@$rows)) {
+       foreach  my $col (keys %cols) {
+           my @pair = ( 0 + $$row[ 0 ], 0 + $$row[ $cols{ $col }  ]);
+           push(@{ $data{$col} }, \@pair);
+       }
+
+    }
+
+  $sth->finish();
+ $dbh->disconnect;
+  # Disconnect from the database.
+
+    $json = encode_json \%data;
+    
+    print $cgi->header('application/json');
+    print $json;
+    return;
+
+};
+sub resp_archive_day {
+    my $cgi  = shift;   # CGI.pm object
+    return if !ref $cgi;
+    $ENV{ORACLE_HOME} = '/u01/app/oracle/product/11.2.0/xe';
+    $ENV{ORACLE_SID}    = 'XE';
+
+    my $datefrom = $cgi->param('from');
+    my $dateto = $cgi->param('to');
+my %cols = (
+   # epoche_time => 0,
+    max_outtemp => 1, 
+    min_outtemp => 2, 
+    rain => 3 
+    );
+
+
+my $dbh = DBI->connect("dbi:Oracle:host=192.168.0.7;sid=XE;port=1521", "vp2", "vp2", {'RaiseError' => 1}) || print $DBI::errstr;
+    $dbh->do("ALTER SESSION SET NLS_NUMERIC_CHARACTERS = '.,'");
+
+my $sth = $dbh->prepare("SELECT round((to_date(substr(id,1,8) ,'YYYYMMDD') - to_date('01011970','DDMMYYYY'))*24*60*60*1000) epoche_time, 
+max(nvl(hi_outtemp,outtemp)) max_temp, min(nvl(lo_outtemp,outtemp)) min_temp, sum(rain) daily_rain 
+from data_arch
+where nvl(hi_outtemp,outtemp) < 100 
+group by substr(id,1,8)
+order by 1"  ) || print $DBI::errstr;
   $sth->execute() || print $DBI::errstr;
   my %data;
     my $rows = $sth->fetchall_arrayref();
